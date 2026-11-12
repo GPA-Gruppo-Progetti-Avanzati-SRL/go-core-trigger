@@ -11,9 +11,16 @@ import (
 // authenticate verifica il token Bearer contro quello condiviso. Si confrontano gli SHA-256 dei due
 // valori e non i valori: subtle.ConstantTimeCompare è a tempo costante solo a parità di lunghezza, e
 // confrontando i token in chiaro la durata direbbe quanto è lungo quello giusto.
-func authenticate(cfg *Config, authorization string) *core.Error {
-	if cfg.Disabled {
+//
+// open = autenticazione spenta (develop-mode senza token). Senza un token utilizzabile e fuori dal
+// develop-mode ogni richiesta è rifiutata: Register lo impedisce già all'avvio, ma un Trigger usato
+// senza Register non deve diventare aperto per difetto.
+func authenticate(cfg *Config, open bool, authorization string) *core.Error {
+	if open {
 		return nil
+	}
+	if problem := cfg.tokenProblem(); problem != "" {
+		return unauthorized(CodeTokenInvalid, "trigger non configurato: "+problem)
 	}
 	token, ok := strings.CutPrefix(strings.TrimSpace(authorization), "Bearer ")
 	token = strings.TrimSpace(token)

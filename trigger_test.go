@@ -20,27 +20,37 @@ func TestAuthenticate(t *testing.T) {
 		"Bearer " + token + "x": CodeTokenInvalid,
 	}
 	for header, code := range casi {
-		if appErr := authenticate(cfg, header); appErr == nil || appErr.Code != code || appErr.StatusCode != 401 {
+		if appErr := authenticate(cfg, false, header); appErr == nil || appErr.Code != code || appErr.StatusCode != 401 {
 			t.Errorf("%q: atteso 401 %s, ottenuto %v", header, code, appErr)
 		}
 	}
-	if appErr := authenticate(cfg, "  "+bearer+" "); appErr != nil {
+	if appErr := authenticate(cfg, false, "  "+bearer+" "); appErr != nil {
 		t.Errorf("token valido rifiutato: %v", appErr)
 	}
-	if appErr := authenticate(&Config{Disabled: true}, ""); appErr != nil {
-		t.Errorf("autenticazione disattivata: %v", appErr)
+	if appErr := authenticate(&Config{}, true, ""); appErr != nil {
+		t.Errorf("autenticazione spenta (develop-mode): %v", appErr)
+	}
+	// Senza un token utilizzabile e non aperto (Trigger usato senza Register): tutto rifiutato, anche
+	// chi presenta il segnaposto letterale come token.
+	for _, cfg := range []*Config{{}, {Token: "${TRIGGER_TOKEN}"}} {
+		if appErr := authenticate(cfg, false, "Bearer ${TRIGGER_TOKEN}"); appErr == nil || appErr.StatusCode != 401 {
+			t.Errorf("token %q non utilizzabile: atteso 401, ottenuto %v", cfg.Token, appErr)
+		}
 	}
 }
 
-func TestConfig_Validate(t *testing.T) {
-	if err := (&Config{}).Validate(); err == nil {
-		t.Error("token assente con l'autenticazione attiva: atteso errore")
+func TestConfig_TokenProblem(t *testing.T) {
+	if (&Config{Token: token}).tokenProblem() != "" {
+		t.Error("token valido segnalato")
 	}
-	if err := (&Config{Token: "${TRIGGER_TOKEN}"}).Validate(); err == nil || !strings.Contains(err.Error(), "non risolto") {
-		t.Errorf("segnaposto non risolto: atteso errore, ottenuto %v", err)
+	if p := (&Config{}).tokenProblem(); p == "" {
+		t.Error("token assente: atteso un problema")
 	}
-	if err := (&Config{Disabled: true}).Validate(); err != nil {
-		t.Errorf("disabled senza token: %v", err)
+	if p := (&Config{Token: "${TRIGGER_TOKEN}"}).tokenProblem(); !strings.Contains(p, "non risolto") {
+		t.Errorf("segnaposto non risolto: %q", p)
+	}
+	if err := (&Config{MaxWait: -1}).Validate(); err == nil {
+		t.Error("max-wait negativo: atteso errore")
 	}
 }
 

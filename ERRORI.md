@@ -6,7 +6,7 @@ Tutti gli errori nati qui hanno `Ambit = go-core-trigger` e la forma `DefaultErr
 | Codice | HTTP | Costante | Quando |
 |---|---|---|---|
 | `TRIGGER-AUTH-001` | 401 | `CodeTokenMissing` | `Authorization` assente o non `Bearer <token>` |
-| `TRIGGER-AUTH-002` | 401 | `CodeTokenInvalid` | token diverso da quello condiviso (`services.trigger.token`) |
+| `TRIGGER-AUTH-002` | 401 | `CodeTokenInvalid` | token diverso da quello condiviso (`services.trigger.token`), o trigger senza un token utilizzabile usato senza `Register` (che fuori dal develop-mode non parte nemmeno) |
 | `TRIGGER-AUTH-003` | 403 | `CodeTaskDenied` | task dichiarato ma non fra quelli ammessi (`services.trigger.tasks`) |
 | `TRIGGER-TASK` | 404 | `CodeUnknownTask` | task non dichiarato in `tasks:` |
 | `TRIGGER-RUN` | 404 | `CodeUnknownRun` | `runId` malformato, o work item della run inesistente (cancellato dalla retention) |

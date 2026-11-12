@@ -21,8 +21,8 @@ type declaredTasks []task.Config
 // Dipendenze dal grafo: store.IWorkItemStore (batch.WithStore); s3.Feeder se un task ha s3:
 // (batch.WithS3(s3feed.Module)), altrimenti l'avvio fallisce dicendolo; OutcomeReader facoltativo.
 //
-// Una config non valida (token assente con l'autenticazione attiva) fa panic qui: un trigger senza
-// token esporrebbe l'avvio dei task a chiunque raggiunga l'applicativo.
+// Una config non valida fa panic qui. Il token si verifica in Register, che conosce il develop-mode
+// di go-core-api: obbligatorio fuori, facoltativo dentro.
 func Module(cfg *Config, tasks []task.Config, modes ...string) {
 	if err := cfg.Validate(); err != nil {
 		panic(err.Error())

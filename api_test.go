@@ -55,3 +55,37 @@ func TestAPI(t *testing.T) {
 		t.Fatalf("elenco: %d %s", resp.Code, resp.Body.String())
 	}
 }
+
+// Il token è obbligatorio fuori dal develop-mode (panic al wiring) e facoltativo dentro, dove
+// l'autenticazione si spegne.
+func TestRegister_TokenEDevelopMode(t *testing.T) {
+	for _, tok := range []string{"", "${TRIGGER_TOKEN}"} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("token %q fuori dal develop-mode: atteso panic", tok)
+				}
+			}()
+			_, api := humatest.New(t)
+			tr := newTestTrigger(&storeFake{}, &feederFake{}, nil)
+			tr.cfg = &Config{Token: tok}
+			Register(&coreapi.Router{Api: api}, tr)
+		}()
+	}
+
+	_, api := humatest.New(t)
+	tr := newTestTrigger(&storeFake{}, &feederFake{}, nil)
+	tr.cfg = &Config{Token: "${TRIGGER_TOKEN}"}
+	Register(&coreapi.Router{Api: api, DevelopMode: true}, tr)
+	if resp := api.Post(BasePath+"/selftest", map[string]any{}); resp.Code != http.StatusAccepted {
+		t.Fatalf("develop-mode senza token: attesa 202 senza Authorization, ottenuto %d %s", resp.Code, resp.Body.String())
+	}
+
+	// Col token, anche in develop-mode l'autenticazione resta.
+	_, api = humatest.New(t)
+	tr = newTestTrigger(&storeFake{}, &feederFake{}, nil)
+	Register(&coreapi.Router{Api: api, DevelopMode: true}, tr)
+	if resp := api.Post(BasePath+"/selftest", map[string]any{}); resp.Code != http.StatusUnauthorized {
+		t.Fatalf("develop-mode col token: atteso 401 senza Authorization, ottenuto %d", resp.Code)
+	}
+}

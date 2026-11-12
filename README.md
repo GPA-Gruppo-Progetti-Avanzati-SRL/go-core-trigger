@@ -86,8 +86,7 @@ Codici d'uscita (gli stessi di `invokeBatch.sh`): `SUCCESS` 0, `ERROR` 1, `NOTHI
 
 ```yaml
 trigger:
-  token: "${TRIGGER_TOKEN}"   # obbligatorio: il token del Secret condiviso nel namespace
-  disabled: false             # true = nessuna autenticazione (solo sviluppo)
+  token: "${TRIGGER_TOKEN}"   # il token del Secret condiviso nel namespace (facoltativo solo in develop-mode)
   tasks: []                   # task attivabili; vuoto = tutti quelli di tasks:
   max-wait: 50s               # tetto del long-poll (sotto il timeout della Route)
   run-ttl: 12h                # durata massima di una run S3
@@ -95,8 +94,14 @@ trigger:
 
 **Token condiviso.** Un solo Secret nel namespace, con la chiave `token`. L'applicativo lo legge come
 variabile d'ambiente (`TRIGGER_TOKEN`, da `secretKeyRef`); il Job/CronJob che chiama lo monta come
-file. Il confronto avviene a tempo costante, sugli SHA-256 dei due valori. Senza token, con
-l'autenticazione attiva, `Module` va in panic: l'applicativo non parte.
+file. Il confronto avviene a tempo costante, sugli SHA-256 dei due valori.
+
+**Token obbligatorio, salvo in develop-mode.** Fuori dal `develop-mode: true` di go-core-api, un token
+assente fa panic in `Register`: l'applicativo non parte. Con `develop-mode: true` il token è
+facoltativo: se manca l'autenticazione è spenta (con un Warn al boot), come le altre comodità di
+sviluppo del develop-mode; se c'è, vale anche lì. Un segnaposto non risolto (`${TRIGGER_TOKEN}` con
+la variabile non definita: la sostituzione della config lascia il letterale) conta come token assente,
+altrimenti il token sarebbe la stringa scritta nel repository.
 
 **Con go-core-auth.** Il middleware di `apiauth` nega le richieste senza ruoli, e i suoi
 `guest-paths` sono path esatte, quindi non coprono `/api/v1/trigger/{task}`. Un'app che monta

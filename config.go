@@ -20,14 +20,12 @@ const (
 //
 //	trigger:
 //	  token: "${TRIGGER_TOKEN}"   # dal Secret condiviso del namespace
-//	  tasks: [import, selftest]    # facoltativo: i task attivabili (vuoto = tutti quelli dichiarati)
+//	  tasks: [import, selftest]   # facoltativo: i task attivabili (vuoto = tutti quelli dichiarati)
 type Config struct {
-	// Disabled spegne l'autenticazione: ogni richiesta è un chiamante anonimo. Solo sviluppo. È un
-	// "disabled" e non un "enabled" perché lo zero value deve essere quello sicuro.
-	Disabled bool `yaml:"disabled" mapstructure:"disabled" json:"disabled"`
 	// Token è il segreto condiviso con chi chiama (il Job/CronJob con esegui.sh): lo stesso Secret
 	// del namespace, montato nell'applicativo come variabile d'ambiente e nel job come file.
-	// Obbligatorio se l'autenticazione è attiva.
+	// Obbligatorio, salvo con `develop-mode: true` di go-core-api: lì, se manca, l'autenticazione è
+	// spenta (vedi Register).
 	Token string `yaml:"token" mapstructure:"token" json:"-"`
 	// Tasks limita i task attivabili; vuoto = tutti quelli della sezione `tasks:` del batch.
 	Tasks []string `yaml:"tasks" mapstructure:"tasks" json:"tasks"`
@@ -37,23 +35,28 @@ type Config struct {
 	RunTTL time.Duration `yaml:"run-ttl" mapstructure:"run-ttl" json:"run-ttl"`
 }
 
-// Validate controlla la Config. È chiamata da Module: un trigger senza token non deve partire,
-// perché esporrebbe l'avvio dei task a chiunque raggiunga l'applicativo.
+// Validate controlla la Config; è chiamata da Module. Il token non si controlla qui: se sia
+// obbligatorio dipende dal develop-mode di go-core-api, che si conosce solo in Register.
 func (c *Config) Validate() error {
-	if !c.Disabled && c.Token == "" {
-		return errors.New("trigger: token obbligatorio (services.trigger.token, dal Secret condiviso); disabled: true solo in sviluppo")
-	}
-	// La sostituzione delle variabili d'ambiente della config (tpm-common) lascia `${NOME}` così
-	// com'è quando la variabile non è definita: il token sarebbe il letterale scritto nello YAML,
-	// cioè noto a chiunque legga il repository. Un Secret non montato deve fermare l'avvio, non
-	// aprire l'API con un token pubblico.
-	if !c.Disabled && strings.Contains(c.Token, "${") {
-		return errors.New("trigger: il token è il segnaposto " + c.Token + " non risolto: la variabile d'ambiente non è definita (Secret non montato?)")
-	}
 	if c.MaxWait < 0 || c.RunTTL < 0 {
 		return errors.New("trigger: max-wait e run-ttl non possono essere negativi")
 	}
 	return nil
+}
+
+// tokenProblem dice perché il token non è utilizzabile, "" se lo è.
+//
+// La sostituzione delle variabili d'ambiente della config (tpm-common) lascia `${NOME}` così com'è
+// quando la variabile non è definita: il token sarebbe il letterale scritto nello YAML, cioè noto a
+// chiunque legga il repository. Un segnaposto non risolto vale quindi come token assente.
+func (c *Config) tokenProblem() string {
+	switch {
+	case c.Token == "":
+		return "token assente (services.trigger.token, dal Secret condiviso)"
+	case strings.Contains(c.Token, "${"):
+		return "il token è il segnaposto " + c.Token + " non risolto: la variabile d'ambiente non è definita (Secret non montato?)"
+	}
+	return ""
 }
 
 func (c *Config) maxWait() time.Duration {

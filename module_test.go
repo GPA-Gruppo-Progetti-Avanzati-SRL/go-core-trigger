@@ -35,8 +35,8 @@ func TestProvideTrigger_Wiring(t *testing.T) {
 func TestModule_ConfigNonValidaPanica(t *testing.T) {
 	defer func() {
 		if recover() == nil {
-			t.Fatal("token assente: atteso panic")
+			t.Fatal("run-ttl negativo: atteso panic")
 		}
 	}()
-	Module(&Config{}, testTasks())
+	Module(&Config{RunTTL: -1}, testTasks())
 }

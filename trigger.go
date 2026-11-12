@@ -56,6 +56,7 @@ type workItems interface {
 // di Register ne è il client, ma un'app può chiamarlo anche da sé.
 type Trigger struct {
 	cfg     *Config
+	open    bool              // autenticazione spenta: develop-mode senza token (vedi Register)
 	allowed map[string]string // task attivabili: chiave minuscola -> nome come scritto in config
 	sources map[string]bool   // task con s3:, chiave minuscola
 	items   workItems
@@ -119,7 +120,7 @@ func (t *Trigger) kind(taskName string) string {
 
 // Tasks elenca i task attivabili, ordinati.
 func (t *Trigger) Tasks(_ context.Context, authorization string) ([]TaskInfo, *core.Error) {
-	if appErr := authenticate(t.cfg, authorization); appErr != nil {
+	if appErr := authenticate(t.cfg, t.open, authorization); appErr != nil {
 		return nil, appErr
 	}
 	out := make([]TaskInfo, 0, len(t.allowed))
@@ -134,7 +135,7 @@ func (t *Trigger) Tasks(_ context.Context, authorization string) ([]TaskInfo, *c
 // aggancia a quello già attivo; per un task con s3: esegue il feed, e col bucket vuoto la run torna
 // già conclusa NOTHINGTODO.
 func (t *Trigger) Start(ctx context.Context, authorization, taskName string, params map[string]any) (*Run, *core.Error) {
-	if appErr := authenticate(t.cfg, authorization); appErr != nil {
+	if appErr := authenticate(t.cfg, t.open, authorization); appErr != nil {
 		return nil, appErr
 	}
 	name, appErr := t.resolve(taskName)
@@ -150,7 +151,7 @@ func (t *Trigger) Start(ctx context.Context, authorization, taskName string, par
 // Get legge lo stato di una run, attendendo al più wait (limitato da max-wait) che si concluda. Ogni
 // valutazione di una run S3 la fa anche avanzare: riaccoda i file arrivati nel frattempo.
 func (t *Trigger) Get(ctx context.Context, authorization, runID string, wait time.Duration) (*Run, *core.Error) {
-	if appErr := authenticate(t.cfg, authorization); appErr != nil {
+	if appErr := authenticate(t.cfg, t.open, authorization); appErr != nil {
 		return nil, appErr
 	}
 	ref, ok := parseRunID(runID)

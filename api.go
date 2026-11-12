@@ -6,6 +6,7 @@ import (
 	"time"
 
 	coreapi "github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-api"
+	"github.com/rs/zerolog/log"
 )
 
 // BasePath è il prefisso delle rotte del trigger.
@@ -17,9 +18,22 @@ const tag = "trigger"
 //
 //	coreapi.Module(&svc.Api, coreapi.WithRoutes(trigger.Register))
 //
-// Le rotte si autenticano da sé col token condiviso. Se l'app monta anche il middleware di
-// go-core-auth, che nega le richieste senza ruoli, le path del trigger vanno escluse da lì.
+// Le rotte si autenticano da sé col token condiviso. Il token è obbligatorio, salvo con
+// `develop-mode: true` di go-core-api: lì, se manca (o è un segnaposto non risolto), l'autenticazione
+// è spenta con un Warn, come le altre comodità di sviluppo del develop-mode. Fuori dal develop-mode un
+// token mancante fa panic qui, cioè al wiring: l'applicativo non parte invece di esporre l'avvio dei
+// task a chiunque lo raggiunga.
+//
+// Se l'app monta anche il middleware di go-core-auth, che nega le richieste senza ruoli, le path del
+// trigger vanno escluse da lì.
 func Register(r *coreapi.Router, t *Trigger) {
+	if problem := t.cfg.tokenProblem(); problem != "" {
+		if !r.DevelopMode {
+			panic("trigger: " + problem + "; il token è facoltativo solo con api.develop-mode: true")
+		}
+		t.open = true
+		log.Warn().Str("motivo", problem).Msg("trigger: develop-mode senza token, autenticazione spenta")
+	}
 	coreapi.RegisterWithBusiness(r, t, startOperation, start)
 	coreapi.RegisterWithBusiness(r, t, getRunOperation, getRun)
 	coreapi.RegisterWithBusiness(r, t, listOperation, list)
