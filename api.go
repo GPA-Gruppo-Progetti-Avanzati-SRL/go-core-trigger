@@ -1,0 +1,119 @@
+package trigger
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	coreapi "github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-api"
+)
+
+// BasePath è il prefisso delle rotte del trigger.
+const BasePath = "/api/v1/trigger"
+
+const tag = "trigger"
+
+// Register monta le rotte del trigger sul Router di go-core-api:
+//
+//	coreapi.Module(&svc.Api, coreapi.WithRoutes(trigger.Register))
+//
+// Le rotte si autenticano da sé col token condiviso. Se l'app monta anche il middleware di
+// go-core-auth, che nega le richieste senza ruoli, le path del trigger vanno escluse da lì.
+func Register(r *coreapi.Router, t *Trigger) {
+	coreapi.RegisterWithBusiness(r, t, startOperation, start)
+	coreapi.RegisterWithBusiness(r, t, getRunOperation, getRun)
+	coreapi.RegisterWithBusiness(r, t, listOperation, list)
+}
+
+// StartBody è il corpo facoltativo di POST /api/v1/trigger/{task}.
+type StartBody struct {
+	// Params finisce nel payload del work item (solo task senza s3:).
+	Params map[string]any `json:"params,omitempty"`
+}
+
+var startOperation = coreapi.Operation{
+	OperationID: "TriggerStart",
+	Method:      http.MethodPost,
+	Path:        BasePath + "/{task}",
+	Summary:     "Avvia una run del task (202), o si aggancia a quella attiva (200)",
+	Description: "Il trigger di un task è il suo feed: con un blocco s3: accoda un work item per file, " +
+		"altrimenti un work item. Una run già conclusa (bucket vuoto: NOTHINGTODO) risponde 200.",
+	Tags: []string{tag},
+}
+
+type startInput struct {
+	Authorization string     `header:"Authorization" required:"false" doc:"Bearer <token condiviso>"`
+	Task          string     `path:"task" doc:"nome del task (voce di tasks:)"`
+	Body          *StartBody // puntatore: il body è facoltativo
+}
+
+type startOutput struct {
+	Status int
+	Body   *Run
+}
+
+func start(ctx context.Context, in *startInput, t *Trigger) (*startOutput, error) {
+	var params map[string]any
+	if in.Body != nil {
+		params = in.Body.Params
+	}
+	run, appErr := t.Start(ctx, in.Authorization, in.Task, params)
+	if appErr != nil {
+		return nil, coreapi.ManageBusinessError(appErr)
+	}
+	status := http.StatusAccepted
+	if run.Attached || run.State == StateDone {
+		status = http.StatusOK
+	}
+	return &startOutput{Status: status, Body: run}, nil
+}
+
+var getRunOperation = coreapi.Operation{
+	OperationID: "TriggerGetRun",
+	Method:      http.MethodGet,
+	Path:        BasePath + "/runs/{runId}",
+	Summary:     "Stato di una run, con attesa fino a wait secondi che si concluda",
+	Tags:        []string{tag},
+}
+
+type getRunInput struct {
+	Authorization string `header:"Authorization" required:"false" doc:"Bearer <token condiviso>"`
+	RunID         string `path:"runId"`
+	Wait          int    `query:"wait" minimum:"0" doc:"secondi di attesa massima (limitati da max-wait)"`
+}
+
+type runOutput struct {
+	Body *Run
+}
+
+func getRun(ctx context.Context, in *getRunInput, t *Trigger) (*runOutput, error) {
+	run, appErr := t.Get(ctx, in.Authorization, in.RunID, time.Duration(in.Wait)*time.Second)
+	if appErr != nil {
+		return nil, coreapi.ManageBusinessError(appErr)
+	}
+	return &runOutput{Body: run}, nil
+}
+
+var listOperation = coreapi.Operation{
+	OperationID: "TriggerList",
+	Method:      http.MethodGet,
+	Path:        BasePath,
+	Summary:     "Elenco dei task attivabili",
+	Tags:        []string{tag},
+}
+
+type listInput struct {
+	Authorization string `header:"Authorization" required:"false" doc:"Bearer <token condiviso>"`
+}
+
+type listOutput struct {
+	Body []TaskInfo
+}
+
+func list(ctx context.Context, in *listInput, t *Trigger) (*listOutput, error) {
+	tasks, appErr := t.Tasks(ctx, in.Authorization)
+	if appErr != nil {
+		return nil, coreapi.ManageBusinessError(appErr)
+	}
+	return &listOutput{Body: tasks}, nil
+}
