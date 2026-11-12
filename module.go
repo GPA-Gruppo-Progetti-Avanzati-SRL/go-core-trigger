@@ -19,7 +19,8 @@ type declaredTasks []task.Config
 //	coreapi.Module(&svc.Api, coreapi.WithRoutes(trigger.Register))
 //
 // Dipendenze dal grafo: store.IWorkItemStore (batch.WithStore); s3.Feeder se un task ha s3:
-// (batch.WithS3(s3feed.Module)), altrimenti l'avvio fallisce dicendolo; OutcomeReader facoltativo.
+// (batch.WithS3(s3feed.Module)), altrimenti l'avvio fallisce dicendolo; OutcomeReader e Preparer
+// facoltativi.
 //
 // Una config non valida fa panic qui. Il token si verifica in Register, che conosce il develop-mode
 // di go-core-api: obbligatorio fuori, facoltativo dentro.
@@ -41,8 +42,9 @@ type params struct {
 	Items   store.IWorkItemStore
 	Feeder  s3.Feeder     `optional:"true"`
 	Outcome OutcomeReader `optional:"true"`
+	Prepare Preparer      `optional:"true"`
 }
 
 func provideTrigger(p params) (*Trigger, error) {
-	return newTrigger(p.Cfg, p.Tasks, p.Items, p.Feeder, p.Outcome)
+	return newTrigger(p.Cfg, p.Tasks, p.Items, p.Feeder, p.Outcome, p.Prepare)
 }

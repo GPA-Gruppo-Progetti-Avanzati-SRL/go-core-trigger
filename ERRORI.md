@@ -10,6 +10,7 @@ Tutti gli errori nati qui hanno `Ambit = go-core-trigger` e la forma `DefaultErr
 | `TRIGGER-AUTH-003` | 403 | `CodeTaskDenied` | task dichiarato ma non fra quelli ammessi (`services.trigger.tasks`) |
 | `TRIGGER-TASK` | 404 | `CodeUnknownTask` | task non dichiarato in `tasks:` |
 | `TRIGGER-RUN` | 404 | `CodeUnknownRun` | `runId` malformato, o work item della run inesistente (cancellato dalla retention) |
+| `TRIGGER-OBJECT` | 422 | `CodeObjectOnS3` | `POST /api/v1/trigger/{task}/{objectId}` su un task con `s3:`: i suoi item sono i file, non prende un oggetto |
 | `TRIGGER-START` | 500 | `CodeStart` | esecuzione attiva non trovata dopo la deduplica (due tentativi): un'anomalia dello store |
 
 Arrivano invariati da go-core-batch, con il loro ambito:

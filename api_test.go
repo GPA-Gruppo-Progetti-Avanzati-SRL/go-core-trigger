@@ -48,6 +48,18 @@ func TestAPI(t *testing.T) {
 		t.Fatalf("s3 vuoto: %d %s", resp.Code, resp.Body.String())
 	}
 
+	// Run su un oggetto: un item per (task, oggetto).
+	resp = api.Post(BasePath+"/selftest/ENT_1", auth, map[string]any{})
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("avvio su oggetto: %d %s", resp.Code, resp.Body.String())
+	}
+	if it := st.items[len(st.items)-1]; it.ObjectId != "ENT_1" || it.TaskName != "selftest" {
+		t.Fatalf("item su oggetto: %+v", it)
+	}
+	if resp = api.Post(BasePath+"/import/ENT_1", auth, map[string]any{}); resp.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("s3 con oggetto: atteso 422, ottenuto %d", resp.Code)
+	}
+
 	if resp = api.Post(BasePath+"/nessuno", auth, map[string]any{}); resp.Code != http.StatusNotFound {
 		t.Fatalf("task sconosciuto: %d", resp.Code)
 	}

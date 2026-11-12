@@ -7,13 +7,16 @@
 //   - task con un blocco `s3:` → il feed S3 della libreria (s3.Feeder): un work item per ogni file
 //     del prefisso. La run "a finestra" segue i file e riesegue il feed finché il bucket non è vuoto;
 //   - task senza `s3:` → un work item sul task (objectId = nome del task, payload = params): una sola
-//     esecuzione attiva per task, e una seconda richiesta si aggancia a quella in corso.
+//     esecuzione attiva per task, e una seconda richiesta si aggancia a quella in corso. Se il task
+//     lavora più oggetti (un'entità per item), la richiesta nomina l'oggetto — objectId dell'item, e
+//     la deduplica vale per (task, oggetto) — e il Preparer dell'app, se c'è, lo valida e costruisce
+//     il payload.
 //
 // Ad ESEGUIRE i work item resta il job del task (SingleTask o DistribuiteTask che gira ogni tot): il
 // trigger accoda e osserva, non esegue nulla. Lo stato della run si ricalcola dai work item a ogni
 // lettura, quindi non c'è una tabella delle run ed è identico su Mongo, PostgreSQL e Oracle.
 //
-// Wiring:
+// Wiring (Preparer e OutcomeReader, facoltativi, li fornisce l'app a fx):
 //
 //	trigger.Module(&svc.Trigger, svc.Batch.TasksConfig)
 //	coreapi.Module(&svc.Api, coreapi.WithRoutes(trigger.Register), …)
@@ -45,6 +48,16 @@ type OutcomeReader interface {
 	Outcome(ctx context.Context, item *store.WorkItem) (result, message string, counters map[string]int64, ok bool)
 }
 
+// Preparer è il seam facoltativo con cui l'applicativo valida una richiesta di run di un item e ne
+// costruisce il payload, prima che il trigger accodi: objectID è l'oggetto nominato dalla richiesta
+// ("" se non ne nomina uno, e l'item avrà objectId = nome del task), params il corpo della richiesta.
+// Un errore ritornato è la risposta dell'API (un 404 per un oggetto sconosciuto, un 422 per un
+// parametro non valido) e nulla viene accodato. Senza Preparer il payload è params, e qualunque
+// oggetto è accettato. Non è consultato per i task con s3:, che un oggetto non lo prendono.
+type Preparer interface {
+	Prepare(ctx context.Context, task, objectID string, params map[string]any) (payload any, appErr *core.Error)
+}
+
 // workItems è la parte di store.IWorkItemStore che serve al trigger.
 type workItems interface {
 	InsertIfNotActive(ctx context.Context, items []*store.WorkItem) (int, *core.Error)
@@ -62,20 +75,21 @@ type Trigger struct {
 	items   workItems
 	feeder  s3.Feeder
 	outcome OutcomeReader
+	prepare Preparer
 	now     func() time.Time
 	// Intervallo fra due valutazioni nel long-poll. Una run S3 riesegue il feed (un elenco del
 	// bucket) a ogni valutazione: per questo il suo passo è più lungo.
 	pollItem, pollS3 time.Duration
 }
 
-func newTrigger(cfg *Config, tasks []task.Config, items workItems, feeder s3.Feeder, outcome OutcomeReader) (*Trigger, error) {
+func newTrigger(cfg *Config, tasks []task.Config, items workItems, feeder s3.Feeder, outcome OutcomeReader, prepare Preparer) (*Trigger, error) {
 	declared := make(map[string]string, len(tasks))
 	for _, tc := range tasks {
 		declared[strings.ToLower(tc.Name)] = tc.Name
 	}
 	t := &Trigger{
 		cfg: cfg, allowed: map[string]string{}, sources: map[string]bool{},
-		items: items, feeder: feeder, outcome: outcome, now: time.Now,
+		items: items, feeder: feeder, outcome: outcome, prepare: prepare, now: time.Now,
 		pollItem: time.Second, pollS3: 5 * time.Second,
 	}
 	if len(cfg.Tasks) == 0 {
@@ -131,10 +145,11 @@ func (t *Trigger) Tasks(_ context.Context, authorization string) ([]TaskInfo, *c
 	return out, nil
 }
 
-// Start avvia una run del task. Per un task senza s3: accoda un work item (params nel payload) o si
-// aggancia a quello già attivo; per un task con s3: esegue il feed, e col bucket vuoto la run torna
-// già conclusa NOTHINGTODO.
-func (t *Trigger) Start(ctx context.Context, authorization, taskName string, params map[string]any) (*Run, *core.Error) {
+// Start avvia una run del task. Per un task senza s3: accoda un work item sull'oggetto indicato
+// (objectID "" = il task stesso; payload dal Preparer, altrimenti params) o si aggancia a quello già
+// attivo; per un task con s3: esegue il feed, e col bucket vuoto la run torna già conclusa
+// NOTHINGTODO. Un task con s3: non accetta un oggetto: i suoi item sono i file.
+func (t *Trigger) Start(ctx context.Context, authorization, taskName, objectID string, params map[string]any) (*Run, *core.Error) {
 	if appErr := authenticate(t.cfg, t.open, authorization); appErr != nil {
 		return nil, appErr
 	}
@@ -143,9 +158,24 @@ func (t *Trigger) Start(ctx context.Context, authorization, taskName string, par
 		return nil, appErr
 	}
 	if t.kind(name) == KindS3 {
+		if objectID != "" {
+			return nil, unprocessable(CodeObjectOnS3, "il task "+name+" ha una sorgente s3: e non accetta un oggetto: i suoi item sono i file")
+		}
 		return t.startS3(ctx, name)
 	}
-	return t.startItem(ctx, name, params)
+	var payload any
+	if len(params) > 0 {
+		payload = params
+	}
+	if t.prepare != nil {
+		if payload, appErr = t.prepare.Prepare(ctx, name, objectID, params); appErr != nil {
+			return nil, appErr
+		}
+	}
+	if objectID == "" {
+		objectID = name
+	}
+	return t.startItem(ctx, name, objectID, payload)
 }
 
 // Get legge lo stato di una run, attendendo al più wait (limitato da max-wait) che si concluda. Ogni
@@ -203,7 +233,7 @@ func (t *Trigger) evaluate(ctx context.Context, ref runRef) (*Run, *core.Error) 
 
 // ─── run di un item ────────────────────────────────────────────────────────────────────────────
 
-func (t *Trigger) startItem(ctx context.Context, name string, params map[string]any) (*Run, *core.Error) {
+func (t *Trigger) startItem(ctx context.Context, name, objectID string, payload any) (*Run, *core.Error) {
 	// Due tentativi: fra un InsertIfNotActive che non inserisce e la ricerca dell'item attivo,
 	// quell'esecuzione può essere finita. Al secondo tentativo l'inserimento riesce.
 	for range 2 {
@@ -211,13 +241,11 @@ func (t *Trigger) startItem(ctx context.Context, name string, params map[string]
 		item := &store.WorkItem{
 			Id:         uuid.NewV7().String(),
 			TaskName:   name,
-			ObjectId:   name, // con TaskName è la chiave di deduplica: una sola esecuzione attiva
+			ObjectId:   objectID, // con TaskName è la chiave di deduplica: una sola esecuzione attiva
+			Payload:    payload,
 			Status:     store.StatusPending,
 			CreateTime: now,
 			NextRunAt:  &now,
-		}
-		if len(params) > 0 {
-			item.Payload = params
 		}
 		inserted, appErr := t.items.InsertIfNotActive(ctx, []*store.WorkItem{item})
 		if appErr != nil {
@@ -226,7 +254,7 @@ func (t *Trigger) startItem(ctx context.Context, name string, params map[string]
 		if inserted == 1 {
 			return t.itemRun(ctx, item, false), nil
 		}
-		active, appErr := t.findActive(ctx, name, name)
+		active, appErr := t.findActive(ctx, name, objectID)
 		if appErr != nil {
 			return nil, appErr
 		}
@@ -234,10 +262,10 @@ func (t *Trigger) startItem(ctx context.Context, name string, params map[string]
 			return t.itemRun(ctx, active, true), nil
 		}
 	}
-	return nil, errs.Tech(CodeStart).WithMessage("esecuzione attiva non trovata dopo la deduplica: task " + name)
+	return nil, errs.Tech(CodeStart).WithMessage("esecuzione attiva non trovata dopo la deduplica: task " + name + ", oggetto " + objectID)
 }
 
-// findActive cerca l'esecuzione attiva del task: prima quella in corso, poi quella in coda.
+// findActive cerca l'esecuzione attiva del task sull'oggetto: prima quella in corso, poi quella in coda.
 func (t *Trigger) findActive(ctx context.Context, taskName, objectID string) (*store.WorkItem, *core.Error) {
 	for _, status := range []string{store.StatusInProgress, store.StatusPending} {
 		items, appErr := t.items.List(ctx, taskName, status, page.InitPaging(nil, 50, 1, 0), nil)

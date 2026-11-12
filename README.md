@@ -27,7 +27,7 @@ task (un `SingleTask` o un `DistribuiteTask` che gira ogni tot): il trigger acco
 
 | Task | Il trigger… | La run è conclusa quando… |
 |---|---|---|
-| senza `s3:` (`kind: item`) | accoda un work item (`objectId` = nome del task, `payload` = `params`); se ce n'è già uno attivo ci si aggancia | il work item è DONE (SUCCESS) o FAILED (ERROR) |
+| senza `s3:` (`kind: item`) | accoda un work item (`objectId` = nome del task, o l'oggetto nominato dalla richiesta; `payload` = `params`, o quello del `Preparer`); se ce n'è già uno attivo sullo stesso oggetto ci si aggancia | il work item è DONE (SUCCESS) o FAILED (ERROR) |
 | con `s3:` (`kind: s3`) | esegue il feed S3 del task (`s3.Feeder`): un work item per file del prefisso | il bucket è vuoto e nessun file è in coda (SUCCESS, o NOTHINGTODO se non c'era nulla), oppure un file della run è FAILED (ERROR) |
 
 ```yaml
@@ -59,6 +59,16 @@ run successiva, o il cron di un job `FeedS3Task` se c'è.
 go-core-batch e su più repliche. Due run sullo stesso task vedono gli stessi item e si agganciano di
 fatto.
 
+**Un oggetto per work item.** Un task che lavora un'entità per item (la coda è il task, l'entità è
+l'`objectId`) si attiva nominando l'oggetto: `POST /api/v1/trigger/{task}/{objectId}`. La deduplica
+vale allora per (task, oggetto): due entità diverse girano in coda, la stessa due volte no. Un'app che
+deve validare l'oggetto o i parametri, o costruire il payload nella forma che il suo runner legge,
+fornisce a fx un `trigger.Preparer`: `Prepare(ctx, task, objectID, params) (payload, *core.Error)`
+gira prima dell'accodamento, e il suo errore è la risposta (un 404 per un oggetto sconosciuto, un
+422 per un parametro non valido) senza accodare nulla. Senza `Preparer` il payload è `params` e
+qualunque oggetto è accettato. Un task con `s3:` non prende un oggetto (422 `TRIGGER-OBJECT`): i
+suoi item sono i file.
+
 **Esiti applicativi.** Lo stato di un work item dice solo DONE o FAILED. Un'app che distingue
 NOTHINGTODO o SYSTEMBUSY (un registro suo degli esiti) fornisce a fx un `trigger.OutcomeReader`, che
 il trigger consulta per le run di un item. Un item FAILED resta ERROR in ogni caso.
@@ -70,6 +80,7 @@ Tutte le rotte vogliono `Authorization: Bearer <token>`.
 | Metodo | Path | Risposta |
 |---|---|---|
 | POST | `/api/v1/trigger/{task}` (body `{"params": {...}}` facoltativo) | **202** run avviata, **200** agganciata a una in corso o già conclusa; body `Run` |
+| POST | `/api/v1/trigger/{task}/{objectId}` (stesso body) | come sopra, sul work item di quell'oggetto; 422 `TRIGGER-OBJECT` per un task con `s3:` |
 | GET | `/api/v1/trigger/runs/{runId}?wait=N` | `Run`, dopo aver atteso al più `N` secondi (limitati da `max-wait`) che si concluda |
 | GET | `/api/v1/trigger` | `[{task, kind}]`: i task attivabili |
 

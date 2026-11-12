@@ -35,13 +35,14 @@ func Register(r *coreapi.Router, t *Trigger) {
 		log.Warn().Str("motivo", problem).Msg("trigger: develop-mode senza token, autenticazione spenta")
 	}
 	coreapi.RegisterWithBusiness(r, t, startOperation, start)
+	coreapi.RegisterWithBusiness(r, t, startObjectOperation, startObject)
 	coreapi.RegisterWithBusiness(r, t, getRunOperation, getRun)
 	coreapi.RegisterWithBusiness(r, t, listOperation, list)
 }
 
-// StartBody è il corpo facoltativo di POST /api/v1/trigger/{task}.
+// StartBody è il corpo facoltativo di POST /api/v1/trigger/{task}[/{objectId}].
 type StartBody struct {
-	// Params finisce nel payload del work item (solo task senza s3:).
+	// Params finisce nel payload del work item (solo task senza s3:), o al Preparer dell'app.
 	Params map[string]any `json:"params,omitempty"`
 }
 
@@ -67,11 +68,37 @@ type startOutput struct {
 }
 
 func start(ctx context.Context, in *startInput, t *Trigger) (*startOutput, error) {
+	return startRun(ctx, t, in.Authorization, in.Task, "", in.Body)
+}
+
+var startObjectOperation = coreapi.Operation{
+	OperationID: "TriggerStartObject",
+	Method:      http.MethodPost,
+	Path:        BasePath + "/{task}/{objectId}",
+	Summary:     "Avvia una run del task su un oggetto (202), o si aggancia a quella attiva (200)",
+	Description: "Per i task che lavorano un oggetto per work item (un'entità, un id): accoda un work item " +
+		"con quell'objectId, e una seconda richiesta sullo stesso oggetto si aggancia alla run attiva. " +
+		"Non vale per i task con s3: (422 TRIGGER-OBJECT).",
+	Tags: []string{tag},
+}
+
+type startObjectInput struct {
+	Authorization string     `header:"Authorization" required:"false" doc:"Bearer <token condiviso>"`
+	Task          string     `path:"task" doc:"nome del task (voce di tasks:)"`
+	ObjectID      string     `path:"objectId" doc:"oggetto su cui eseguire il task: objectId del work item"`
+	Body          *StartBody // puntatore: il body è facoltativo
+}
+
+func startObject(ctx context.Context, in *startObjectInput, t *Trigger) (*startOutput, error) {
+	return startRun(ctx, t, in.Authorization, in.Task, in.ObjectID, in.Body)
+}
+
+func startRun(ctx context.Context, t *Trigger, authorization, task, objectID string, body *StartBody) (*startOutput, error) {
 	var params map[string]any
-	if in.Body != nil {
-		params = in.Body.Params
+	if body != nil {
+		params = body.Params
 	}
-	run, appErr := t.Start(ctx, in.Authorization, in.Task, params)
+	run, appErr := t.Start(ctx, authorization, task, objectID, params)
 	if appErr != nil {
 		return nil, coreapi.ManageBusinessError(appErr)
 	}

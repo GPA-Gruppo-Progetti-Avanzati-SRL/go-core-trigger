@@ -16,6 +16,7 @@ const (
 	CodeTaskDenied   = "TRIGGER-AUTH-003" // 403: task non fra quelli ammessi (services.trigger.tasks)
 	CodeUnknownTask  = "TRIGGER-TASK"     // 404: task non dichiarato in tasks:
 	CodeUnknownRun   = "TRIGGER-RUN"      // 404: runId malformato o work item inesistente
+	CodeObjectOnS3   = "TRIGGER-OBJECT"   // 422: oggetto nominato per un task con s3:
 	CodeStart        = "TRIGGER-START"    // 500: avvio della run fallito (store, feed S3)
 )
 
@@ -36,4 +37,8 @@ func forbidden(task string) *core.Error {
 
 func notFound(code, message string) *core.Error {
 	return withStatus(errs.Business(code).WithMessage(message), http.StatusNotFound)
+}
+
+func unprocessable(code, message string) *core.Error {
+	return errs.Business(code).WithMessage(message)
 }

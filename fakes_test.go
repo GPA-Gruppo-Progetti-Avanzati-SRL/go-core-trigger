@@ -131,7 +131,7 @@ func newTestTrigger(st *storeFake, feeder *feederFake, outcome OutcomeReader) *T
 	if feeder != nil {
 		f = feeder
 	}
-	tr, err := newTrigger(&Config{Token: token}, testTasks(), st, f, outcome)
+	tr, err := newTrigger(&Config{Token: token}, testTasks(), st, f, outcome, nil)
 	if err != nil {
 		panic(err)
 	}
