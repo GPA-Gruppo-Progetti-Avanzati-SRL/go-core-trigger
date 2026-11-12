@@ -2,6 +2,7 @@ package trigger
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	core "github.com/GPA-Gruppo-Progetti-Avanzati-SRL/go-core-app"
@@ -12,13 +13,25 @@ import (
 )
 
 // storeFake è uno store in memoria: deduplica su (task, objectId) attivi come uk_workitem_active e
-// List restituisce dal più recente, come i backend della libreria.
+// List restituisce dal più recente, come i backend della libreria. Come un backend vero, restituisce
+// copie: un test che cambia lo stato di un item mentre il trigger lo legge (il long-poll) passa da
+// setStatus, sotto lo stesso lock.
 type storeFake struct {
+	mu    sync.Mutex
 	items []*store.WorkItem
 	err   *core.Error
 }
 
+// setStatus cambia lo stato dell'i-esimo item, anche mentre il trigger sta leggendo.
+func (s *storeFake) setStatus(i int, status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.items[i].Status = status
+}
+
 func (s *storeFake) InsertIfNotActive(_ context.Context, items []*store.WorkItem) (int, *core.Error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.err != nil {
 		return 0, s.err
 	}
@@ -41,15 +54,20 @@ func (s *storeFake) InsertIfNotActive(_ context.Context, items []*store.WorkItem
 }
 
 func (s *storeFake) GetById(_ context.Context, id string) (*store.WorkItem, *core.Error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, it := range s.items {
 		if it.Id == id {
-			return it, nil
+			c := *it
+			return &c, nil
 		}
 	}
 	return nil, core.NotFoundError()
 }
 
 func (s *storeFake) List(_ context.Context, taskName, status string, pg *page.Paging, _ page.SortRequest) ([]*store.WorkItem, *core.Error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -57,7 +75,8 @@ func (s *storeFake) List(_ context.Context, taskName, status string, pg *page.Pa
 	for i := len(s.items) - 1; i >= 0; i-- { // dal più recente
 		it := s.items[i]
 		if it.TaskName == taskName && it.Status == status {
-			all = append(all, it)
+			c := *it
+			all = append(all, &c)
 		}
 	}
 	start := (pg.CurrentPage - 1) * pg.PageSize

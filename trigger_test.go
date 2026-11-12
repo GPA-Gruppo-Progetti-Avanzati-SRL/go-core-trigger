@@ -162,7 +162,7 @@ func TestGet_LongPollSiFermaAllaConclusione(t *testing.T) {
 	run, _ := tr.Start(context.Background(), bearer, "selftest", "", nil)
 	go func() {
 		time.Sleep(30 * time.Millisecond)
-		st.items[0].Status = store.StatusDone
+		st.setStatus(0, store.StatusDone)
 	}()
 	start := time.Now()
 	got, _ := tr.Get(context.Background(), bearer, run.RunId, 5*time.Second)
