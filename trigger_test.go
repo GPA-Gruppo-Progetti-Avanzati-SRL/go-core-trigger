@@ -54,7 +54,7 @@ func TestRunID(t *testing.T) {
 	if !ok || ref.kind != KindS3 || ref.task != "flusso:a" || !ref.since.Equal(since) {
 		t.Fatalf("s3: %+v %v", ref, ok)
 	}
-	for _, bad := range []string{"", "item:", "s3:", "s3:cflow", "s3:cflow:x", "s3::12", "altro:1"} {
+	for _, bad := range []string{"", "item:", "s3:", "s3:import", "s3:import:x", "s3::12", "altro:1"} {
 		if _, ok := parseRunID(bad); ok {
 			t.Errorf("%q: atteso non valido", bad)
 		}
@@ -76,12 +76,12 @@ func TestStart_TaskSconosciutoONonAmmesso(t *testing.T) {
 	if _, appErr := tr.Start(context.Background(), bearer, "nessuno", nil); appErr == nil || appErr.StatusCode != 404 || appErr.Code != CodeUnknownTask {
 		t.Fatalf("task sconosciuto: %v", appErr)
 	}
-	tr.cfg.Tasks = []string{"cflow"}
-	tr.allowed = map[string]string{"cflow": "cflow"}
+	tr.cfg.Tasks = []string{"import"}
+	tr.allowed = map[string]string{"import": "import"}
 	if _, appErr := tr.Start(context.Background(), bearer, "selftest", nil); appErr == nil || appErr.StatusCode != 403 {
 		t.Fatalf("task non ammesso: atteso 403, ottenuto %v", appErr)
 	}
-	if _, appErr := tr.Start(context.Background(), "Bearer no", "cflow", nil); appErr == nil || appErr.StatusCode != 401 {
+	if _, appErr := tr.Start(context.Background(), "Bearer no", "import", nil); appErr == nil || appErr.StatusCode != 401 {
 		t.Fatalf("token errato: atteso 401, ottenuto %v", appErr)
 	}
 }
@@ -166,7 +166,7 @@ func TestGet_LongPollSiFermaAllaConclusione(t *testing.T) {
 func TestS3Run_BucketVuotoChiudeSubito(t *testing.T) {
 	feeder := &feederFake{}
 	tr := newTestTrigger(&storeFake{}, feeder, nil)
-	run, appErr := tr.Start(context.Background(), bearer, "cflow", nil)
+	run, appErr := tr.Start(context.Background(), bearer, "import", nil)
 	if appErr != nil || run.State != StateDone || run.Result != ResultNothingToDo || *run.ExitCode != 4 || feeder.calls != 1 {
 		t.Fatalf("bucket vuoto: %+v %v (feed %d)", run, appErr, feeder.calls)
 	}
@@ -179,11 +179,11 @@ func TestS3Run_BucketVuotoChiudeSubito(t *testing.T) {
 
 func TestS3Run_CicloCompleto(t *testing.T) {
 	st := &storeFake{}
-	feeder := &feederFake{files: []string{"cflow/todo/1.dat", "cflow/todo/2.dat"}}
+	feeder := &feederFake{files: []string{"inbox/1.dat", "inbox/2.dat"}}
 	tr := newTestTrigger(st, feeder, nil)
 	ctx := context.Background()
 
-	run, appErr := tr.Start(ctx, bearer, "cflow", nil)
+	run, appErr := tr.Start(ctx, bearer, "import", nil)
 	if appErr != nil || run.State != StateRunning || len(st.items) != 2 || run.Kind != KindS3 {
 		t.Fatalf("avvio: %+v %v (%d item)", run, appErr, len(st.items))
 	}
@@ -209,7 +209,7 @@ func TestS3Run_FileArrivatiNelFrattempoSiAccodano(t *testing.T) {
 	st := &storeFake{}
 	feeder := &feederFake{files: []string{"a"}}
 	tr := newTestTrigger(st, feeder, nil)
-	run, _ := tr.Start(context.Background(), bearer, "cflow", nil)
+	run, _ := tr.Start(context.Background(), bearer, "import", nil)
 	st.items[0].Status = store.StatusDone
 	feeder.files = []string{"b"} // "a" spostato, "b" arrivato
 	if got, _ := tr.Get(context.Background(), bearer, run.RunId, 0); got.State != StateRunning || len(st.items) != 2 {
@@ -220,9 +220,9 @@ func TestS3Run_FileArrivatiNelFrattempoSiAccodano(t *testing.T) {
 // Il file fallito è ancora nel prefisso: riaccodarlo lo farebbe rielaborare senza fine.
 func TestS3Run_FileFallitoChiudeErroreSenzaRiaccodare(t *testing.T) {
 	st := &storeFake{}
-	feeder := &feederFake{files: []string{"cflow/todo/A.txt"}}
+	feeder := &feederFake{files: []string{"inbox/A.txt"}}
 	tr := newTestTrigger(st, feeder, nil)
-	run, _ := tr.Start(context.Background(), bearer, "cflow", nil)
+	run, _ := tr.Start(context.Background(), bearer, "import", nil)
 	st.items[0].Status = store.StatusFailed
 	calls := feeder.calls
 	got, _ := tr.Get(context.Background(), bearer, run.RunId, 0)
@@ -233,18 +233,18 @@ func TestS3Run_FileFallitoChiudeErroreSenzaRiaccodare(t *testing.T) {
 
 func TestS3Run_FallitoDiUnaRunPrecedenteSiIgnora(t *testing.T) {
 	st := &storeFake{}
-	st.add("cflow", "VECCHIO", store.StatusFailed, t0.Add(-time.Hour))
+	st.add("import", "VECCHIO", store.StatusFailed, t0.Add(-time.Hour))
 	tr := newTestTrigger(st, &feederFake{}, nil)
-	if run, _ := tr.Start(context.Background(), bearer, "cflow", nil); run.Result != ResultNothingToDo {
+	if run, _ := tr.Start(context.Background(), bearer, "import", nil); run.Result != ResultNothingToDo {
 		t.Fatalf("il FAILED è precedente alla run: %+v", run)
 	}
 }
 
 func TestS3Run_AgganciataSeCeLavoroInCorso(t *testing.T) {
 	st := &storeFake{}
-	st.add("cflow", "in-corso", store.StatusInProgress, t0.Add(-time.Minute))
+	st.add("import", "in-corso", store.StatusInProgress, t0.Add(-time.Minute))
 	tr := newTestTrigger(st, &feederFake{}, nil)
-	if run, _ := tr.Start(context.Background(), bearer, "cflow", nil); !run.Attached || run.State != StateRunning {
+	if run, _ := tr.Start(context.Background(), bearer, "import", nil); !run.Attached || run.State != StateRunning {
 		t.Fatalf("lavoro in corso: %+v", run)
 	}
 }
@@ -257,17 +257,17 @@ func TestS3Run_TTLEFeedFallito(t *testing.T) {
 
 	// Feed fallito all'avvio: errore al chiamante (lo script lo riporta come non avviata).
 	feeder.err = core.TechnicalError().WithCode("BATCH-S3-LIST")
-	if _, appErr := tr.Start(ctx, bearer, "cflow", nil); appErr == nil || appErr.Code != "BATCH-S3-LIST" {
+	if _, appErr := tr.Start(ctx, bearer, "import", nil); appErr == nil || appErr.Code != "BATCH-S3-LIST" {
 		t.Fatalf("feed fallito all'avvio: %v", appErr)
 	}
 	// Feed fallito durante la run: resta RUNNING, si riprova.
-	runID := s3RunID("cflow", t0.Add(-time.Minute))
+	runID := s3RunID("import", t0.Add(-time.Minute))
 	got, appErr := tr.Get(ctx, bearer, runID, 0)
 	if appErr != nil || got.State != StateRunning || !strings.Contains(got.Message, "si riprova") {
 		t.Fatalf("feed fallito in corsa: %+v %v", got, appErr)
 	}
 	// Oltre run-ttl: ERROR.
-	old := s3RunID("cflow", t0.Add(-13*time.Hour))
+	old := s3RunID("import", t0.Add(-13*time.Hour))
 	if got, _ = tr.Get(ctx, bearer, old, 0); got.Result != ResultError || !strings.Contains(got.Message, "scaduta") {
 		t.Fatalf("scaduta: %+v", got)
 	}
@@ -276,7 +276,7 @@ func TestS3Run_TTLEFeedFallito(t *testing.T) {
 func TestTasks(t *testing.T) {
 	tr := newTestTrigger(&storeFake{}, &feederFake{}, nil)
 	got, appErr := tr.Tasks(context.Background(), bearer)
-	if appErr != nil || len(got) != 2 || got[0] != (TaskInfo{Task: "cflow", Kind: KindS3}) || got[1] != (TaskInfo{Task: "selftest", Kind: KindItem}) {
+	if appErr != nil || len(got) != 2 || got[0] != (TaskInfo{Task: "import", Kind: KindS3}) || got[1] != (TaskInfo{Task: "selftest", Kind: KindItem}) {
 		t.Fatalf("elenco: %+v %v", got, appErr)
 	}
 }

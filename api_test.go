@@ -43,7 +43,7 @@ func TestAPI(t *testing.T) {
 	}
 
 	// Run S3 col bucket vuoto: 200 già conclusa NOTHINGTODO.
-	resp = api.Post(BasePath+"/cflow", auth, map[string]any{})
+	resp = api.Post(BasePath+"/import", auth, map[string]any{})
 	if resp.Code != http.StatusOK || !strings.Contains(resp.Body.String(), `"result":"NOTHINGTODO"`) {
 		t.Fatalf("s3 vuoto: %d %s", resp.Code, resp.Body.String())
 	}

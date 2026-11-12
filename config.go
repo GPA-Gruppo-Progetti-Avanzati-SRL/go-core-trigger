@@ -20,7 +20,7 @@ const (
 //
 //	trigger:
 //	  token: "${TRIGGER_TOKEN}"   # dal Secret condiviso del namespace
-//	  tasks: [cflow, selftest]    # facoltativo: i task attivabili (vuoto = tutti quelli dichiarati)
+//	  tasks: [import, selftest]    # facoltativo: i task attivabili (vuoto = tutti quelli dichiarati)
 type Config struct {
 	// Disabled spegne l'autenticazione: ogni richiesta è un chiamante anonimo. Solo sviluppo. È un
 	// "disabled" e non un "enabled" perché lo zero value deve essere quello sicuro.

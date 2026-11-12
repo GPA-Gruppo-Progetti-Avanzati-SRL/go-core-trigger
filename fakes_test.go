@@ -115,7 +115,7 @@ var t0 = time.Date(2026, 11, 12, 22, 0, 0, 0, time.UTC)
 func testTasks() []task.Config {
 	return []task.Config{
 		{Name: "selftest", Type: "SELFTEST"},
-		{Name: "cflow", Type: "CFLOW", S3: &s3.Source{Service: "s3", DestPath: "done"}},
+		{Name: "import", Type: "IMPORT", S3: &s3.Source{Service: "s3", DestPath: "done"}},
 	}
 }
 

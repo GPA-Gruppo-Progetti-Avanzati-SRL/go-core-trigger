@@ -34,12 +34,12 @@ task (un `SingleTask` o un `DistribuiteTask` che gira ogni tot): il trigger acco
 tasks:
   - name: selftest
     type: SELFTEST
-  - name: cflow
-    type: CFLOW                       # runner.RegisterFile
-    s3: { service: s3, path: "cflow/todo/", pattern: "*", dest-path: "cflow/done" }
+  - name: import
+    type: IMPORT                       # runner.RegisterFile
+    s3: { service: s3, path: "inbox/", pattern: "*", dest-path: "archive" }
 jobs:
   - { name: selftest-exec, type: SingleTask, cron: "*/10 * * * * *", properties: { task: selftest } }
-  - { name: cflow-exec,    type: SingleTask, cron: "*/30 * * * * *", lock-timeout: 3h, properties: { task: cflow } }
+  - { name: import-exec,    type: SingleTask, cron: "*/30 * * * * *", lock-timeout: 3h, properties: { task: import } }
 ```
 
 **La run S3 è "a finestra".** Ogni lettura della run (il long-poll di chi la segue) la fa avanzare:
@@ -74,7 +74,7 @@ Tutte le rotte vogliono `Authorization: Bearer <token>`.
 | GET | `/api/v1/trigger` | `[{task, kind}]`: i task attivabili |
 
 ```json
-{ "runId": "s3:cflow:1794520800000", "task": "cflow", "kind": "s3", "state": "DONE",
+{ "runId": "s3:import:1794520800000", "task": "import", "kind": "s3", "state": "DONE",
   "result": "SUCCESS", "exitCode": 0, "message": "2 file elaborati", "counters": {"files": 2},
   "retry": 0, "attached": false }
 ```
